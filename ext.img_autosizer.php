@@ -1,24 +1,21 @@
-<?php
+<?php if (!defined('BASEPATH')) { exit('No direct script access allowed'); }
 /**
  * =====================================================
  * Image AutoSizer - Put large images on a diet!
  * -----------------------------------------------------
- * Copyright 2011 Key Creative. Free for distribution
- * and use. Visit http://www.keycreative.com/ee.
+ * Copyright 2012 EpicVoyage. Free for distribution and
+ * use. See http://www.epicvoyage.org/ee/ for the latest
+ * version.
  * -----------------------------------------------------
  * v1.0: Initial release
- * v1.1: EE 2.5 fixes + cleanup
+ * v1.1: EE 2.5 fixes + Matrix, Assets, Wygwam
+ * v1.2: Added support for the upload_preferences Hidden Configuration Variable
  * =====================================================
  */
-
-if (!defined('BASEPATH')) {
-	exit('No direct script access allowed');
-}
-
 class Img_autosizer_ext {
 	# Basic information about this extension
 	var $name = 'Image Autosizer';
-	var $version = '1.1';
+	var $version = '1.2';
 	var $description = 'Put large images on a diet.';
 	var $settings_exist = 'y';
 	var $docs_url = 'http://www.epicvoyage.org/ee/';
@@ -66,28 +63,31 @@ class Img_autosizer_ext {
 	}
 
 	function _load_upload_prefs() {
+		$this->EE->load->model('file_upload_preferences_model');
+		$directories = $this->EE->file_upload_preferences_model->get_file_upload_preferences();
+
 		# Grab the site's upload preferences.
-		$this->EE->db->select('id, server_path, url');
-		$query = $this->EE->db->get('upload_prefs');
-		if ($query->num_rows) {
+		if (is_array($directories)) {
 			# Loop through each upload type/place.
-			foreach ($query->result_array() as $row) {
+			foreach ($directories as $dir) {
 				# Use directory-specific settings.
-				$this->settings[$row['id']] = array(
-					'path' => $row['server_path'],
-					'url' => $row['url'],
-					'width' => isset($this->settings[$row['id']]) && isset($this->settings[$row['id']]['width']) ?
-						$this->settings[$row['id']]['width'] :
+				$this->settings[$dir['id']] = array(
+					'path' => $dir['server_path'],
+					'url' => $dir['url'],
+					'width' => isset($this->settings[$dir['id']]) && isset($this->settings[$dir['id']]['width']) ?
+						$this->settings[$dir['id']]['width'] :
 						$this->settings['default']['width'],
-					'height' => isset($this->settings[$row['id']]) && isset($this->settings[$row['id']]['height']) ?
-						$this->settings[$row['id']]['height'] :
+					'height' => isset($this->settings[$dir['id']]) && isset($this->settings[$dir['id']]['height']) ?
+						$this->settings[$dir['id']]['height'] :
 						$this->settings['default']['height'],
-					'preserve' => isset($this->settings[$row['id']]) && isset($this->settings[$row['id']]['preserve']) ?
-						$this->settings[$row['id']]['preserve'] :
+					'preserve' => isset($this->settings[$dir['id']]) && isset($this->settings[$dir['id']]['preserve']) ?
+						$this->settings[$dir['id']]['preserve'] :
 						$this->settings['default']['preserve']
 				);
 			}
 		}
+
+		return;
 	}
 
 	# Callback for entry_submission_start hook
@@ -272,7 +272,7 @@ class Img_autosizer_ext {
 			$file = $this->settings[$dir]['path'].'/'.$a['filename'];
 
 			# Verify that the file is an image and exists.
-			if (!preg_match('#\.(?:gif|jpg|jpeg|png|jpe)$#/i', $file) || !file_exists($file)) {
+			if (!preg_match('#\.(?:gif|jpg|jpeg|png|jpe)$#i', $file) || !file_exists($file)) {
 				return;
 			}
 
@@ -459,3 +459,6 @@ class Img_autosizer_ext {
 		return;
 	}
 }
+
+/* End of file ext.img_autosizer.php */
+/* Location: ./system/expressionengine/third_party/img_autosizer/ext.img_autosizer.php */
