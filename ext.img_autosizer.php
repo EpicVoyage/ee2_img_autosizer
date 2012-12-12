@@ -1,13 +1,13 @@
 <?php
 /**
  * =====================================================
- * When an image is encountered that is too large, put
- * it on a diet.
+ * Image AutoSizer - Put large images on a diet!
  * -----------------------------------------------------
  * Copyright 2011 Key Creative. Free for distribution
  * and use. Visit http://www.keycreative.com/ee.
  * -----------------------------------------------------
  * v1.0: Initial release
+ * v1.1: EE 2.5 fixes + cleanup
  * =====================================================
  */
 
@@ -18,10 +18,10 @@ if (!defined('BASEPATH')) {
 class Img_autosizer_ext {
 	# Basic information about this extension
 	var $name = 'Image Autosizer';
-	var $version = '1.0';
-	var $description = 'When an image is encountered that is too large, put it on a diet.';
+	var $version = '1.1';
+	var $description = 'Put large images on a diet.';
 	var $settings_exist = 'y';
-	var $docs_url = 'http://www.keycreative.com/ee';
+	var $docs_url = 'http://www.epicvoyage.org/ee/';
 
 	# Our script's settings
 	var $settings = array(
@@ -36,8 +36,8 @@ class Img_autosizer_ext {
 	function __construct($settings = '') {
 		$this->EE =& get_instance();
 
-		# Bug? According to the docs (and our activation function), $setting
-		# should not be empty after the first initialization.
+		# Always load the settings here, even when EE does not want us to (ie. when the settings
+		# form is displayed).
 		if (empty($settings)) {
 			$this->EE->db->select('settings');
 			$this->EE->db->where('class', __CLASS__);
@@ -58,49 +58,45 @@ class Img_autosizer_ext {
 				$this->settings[$k] = $v;
 			}
 		}
-
-		# Grab the site's upload preferences.
-		$this->EE->db->select('id, server_path');
-		$query = $this->EE->db->get('exp_upload_prefs');
-		if ($query->num_rows) {
-			# Loop through each upload type/place.
-			foreach ($query->result_array() as $row) {
-				# Use directory-specific settings.
-				$params = array(
-					'path' => $row['server_path'],
-					'width' => isset($settings[$row['id']]) && isset($settings[$row['id']]['width']) ?
-						$settings[$row['id']]['width'] :
-						$this->settings['default']['width'],
-					'height' => isset($settings[$row['id']]) && isset($settings[$row['id']]['height']) ?
-						$settings[$row['id']]['height'] :
-						$this->settings['default']['height'],
-					'preserve' => isset($settings[$row['id']]) && isset($settings[$row['id']]['preserve']) ?
-						$settings[$row['id']]['preserve'] :
-						$this->settings['default']['preserve']
-				);
-
-				$this->settings[$row['id']] = $params;
-			}
-		}
-
-		return;
 	}
 
 	# PHP4 Constructor
 	function Current_url_ext($settings = '') {
 		__construct($settings);
+	}
 
-		return;
+	function _load_upload_prefs() {
+		# Grab the site's upload preferences.
+		$this->EE->db->select('id, server_path, url');
+		$query = $this->EE->db->get('upload_prefs');
+		if ($query->num_rows) {
+			# Loop through each upload type/place.
+			foreach ($query->result_array() as $row) {
+				# Use directory-specific settings.
+				$this->settings[$row['id']] = array(
+					'path' => $row['server_path'],
+					'url' => $row['url'],
+					'width' => isset($this->settings[$row['id']]) && isset($this->settings[$row['id']]['width']) ?
+						$this->settings[$row['id']]['width'] :
+						$this->settings['default']['width'],
+					'height' => isset($this->settings[$row['id']]) && isset($this->settings[$row['id']]['height']) ?
+						$this->settings[$row['id']]['height'] :
+						$this->settings['default']['height'],
+					'preserve' => isset($this->settings[$row['id']]) && isset($this->settings[$row['id']]['preserve']) ?
+						$this->settings[$row['id']]['preserve'] :
+						$this->settings['default']['preserve']
+				);
+			}
+		}
 	}
 
 	# Callback for entry_submission_start hook
 	function size_images($channel_id = 0, $autosave = false) {
 		# Loop through the POST variables, since that is where we will find image paths.
-		foreach ($_POST as $k => $v) {
-			if (is_array($v)) {
-				$this->check_for_images_array($_POST);
-			}
-		}
+		$this->_load_upload_prefs();
+		$this->check_for_images_array($this->EE->api_channel_entries->data);//$_POST);
+
+		//echo '<pre>'.htmlentities(print_r($_POST, true)).'</pre>'//exit;
 
 		return;
 	}
@@ -109,48 +105,198 @@ class Img_autosizer_ext {
 	function check_for_images_array(&$a) {
 		# If we have submitted a raw file name...
 		if (!is_array($a)) {
-			$file = $a;
-			if (preg_match('#^/.*\.(?:gif|jpg|jpeg|png|jpe)$#i', $file)) {
+			# Check whether this is a valid image filename.
+			if (preg_match('#\.(?:gif|jpg|jpeg|png|jpe)$#i', $a)) {
+				# Replace {filedir_##} with the actual path...
+				$search = array();
+				$replace = array();
+				foreach ($this->settings as $k => $v) {
+					if (isset($v['path'])) {
+						$search[$k] = '{filedir_'.$k.'}';
+						$replace[$k] = $v['path'];
+					}
+				}
+				$file = str_replace($search, $replace, $a);
+
 				if (!file_exists($file)) {
-					$file = $_SERVER['DOCUMENT_ROOT'].$file;
-					if (!$file_exists($file)) {
-						# Bail out if we could not find the file.
-						return;
+					# Bail out if we could not find the file.
+					return;
+				}
+
+				# Determine which upload rules to follow...
+				$upload_dir = 'default';
+				foreach ($search as $k => $v) {
+					if (strpos($a, $v) !== false) {
+						$upload_dir = $k;
 					}
 				}
 
-				# TODO: Test this block?
-				$upload_dir = 'default';
-				/*$dir = realpath(dirname($file));
-				foreach ($this->settings as $id => $s) {
-					if (realpath($s['path']) == $dir) {
-						$upload_dir = $id;
-					}
-				}*/
-
-				# If we reach this point, we have found the file.
-				$this->resize($file, $upload_dir);
+				# If we have reached this point, hurrah, let the diet begin.
+				if (($info = $this->resize($file, $upload_dir)) && ($this->EE->db->table_exists('exp_files'))) {
+					# Try to update the database table so that the files are listed accurately.
+					$this->EE->db->where('file_name', basename($file));
+					$this->EE->db->where('upload_location_id', $upload_dir);
+					$this->EE->db->update('exp_files', array(
+						'file_size' => $info['size'],
+						'file_hw_original' => $info['height'].' '.$info['width']
+					));
+				}
 			}
-		# Matrix file?
+
+			# Wygwam/raw HTML support.
+			foreach ($this->settings as $upload_dir => $v) {
+				# No need to check the default settings...
+				if ($upload_dir == 'default') {
+					continue;
+				}
+
+				$path = $v['path'];
+				$url = $v['url'];
+				$len_url = strlen($url);
+				$offset = 0;
+
+				# Loop through instances of our image directories.
+				preg_match_all('/<img([^>]*'.str_replace('/', '\x2f', preg_quote($url)).'[^>]*)>/ms', $a, $img_matches, PREG_SET_ORDER);
+				foreach ($img_matches as $i => $img_match) {
+					preg_match_all('/\s([\w-]+)=([\'"])([^\2]*?)\2/', $img_match[1], $attr_matches, PREG_SET_ORDER);
+					$img = array();
+					$quoted = '';
+					foreach ($attr_matches as $attr_match) {
+						$img[$attr_match[1]] = $attr_match[3];
+						$quoted = $attr_match[2];
+					}
+
+					if (!isset($img['src'])) {
+						continue;
+					}
+
+					if (strncmp($img['src'], $url, $len_url) == 0) {
+						$file = $path.substr($img['src'], $len_url);
+						if (file_exists($file)) {
+							# If we have reached this point, hurrah, let the diet begin.
+							if ($info = $this->resize($file, $upload_dir)) {
+								$replace = $img_match[1];
+
+								# Yippee. We get to mod the HTML width/height now...
+								if (isset($img['width'])) {
+									$replace = str_replace(
+										'width='.$quoted.$img['width'].$quoted,
+										'width='.$quoted.$info['width'].$quoted,
+										$replace
+									);
+								}
+								if (isset($img['height'])) {
+									$replace = str_replace(
+										'height='.$quoted.$img['height'].$quoted,
+										'height='.$quoted.$info['height'].$quoted,
+										$replace
+									);
+								}
+
+								if (isset($img['style'])) {
+									$styles = explode(';', $img['style']);
+									$style = array();
+									foreach ($styles as $v) {
+										$e = explode(':', $v);
+										if (isset($e[1])) {
+											$style[trim($e[0])] = trim($e[1]);
+										}
+									}
+
+									if (isset($style['width'])) {
+										$style['width'] = $info['width'].'px';
+									}
+									if (isset($style['height'])) {
+										$style['height'] = $info['height'].'px';
+									}
+
+									$replace_style = '';
+									foreach ($style as $k => $v) {
+										$replace_style .= $k.':'.$v.';';
+									}
+
+									$replace = str_replace(
+										'style='.$quoted.$img['style'].$quoted,
+										'style='.$quoted.$replace_style.$quoted,
+										$replace
+									);
+								}
+
+								$a = str_replace($img_match[1], $replace, $a);
+
+								if ($this->EE->db->table_exists('exp_files')) {
+									# Try to update the database table so that the files are listed accurately.
+									$this->EE->db->where('file_name', basename($file));
+									$this->EE->db->where('upload_location_id', $upload_dir);
+									$this->EE->db->update('exp_files', array(
+										'file_size' => $info['size'],
+										'file_hw_original' => $info['height'].' '.$info['width']
+									));
+								}
+							}
+						}
+					}
+				}
+
+				# Loop through instances of our image directories (if this is real HTML, it should never return "0").
+				/*while ($offset = strpos($a, $url, $offset)) {
+					$quote = strpos($a, '"', $offset);
+
+					$file = $path.substr($a, $offset + $len_url, $quote - $offset - $len_url);
+					if (file_exists($file)) {
+						# If we have reached this point, hurrah, let the diet begin.
+						if ($info = $this->resize($file, $upload_dir)) {
+							# Yippee. We get to mod the HTML width/height now...
+							...
+
+							if ($this->EE->db->table_exists('exp_files')) {
+								# Try to update the database table so that the files are listed accurately.
+								$this->EE->db->where('file_name', basename($file));
+								$this->EE->db->where('upload_location_id', $upload_dir);
+								$this->EE->db->update('exp_files', array(
+									'file_size' => $info['size'],
+									'file_hw_original' => $info['height'].' '.$info['width']
+								));
+							}
+						}
+					}
+
+					$offset++;
+				}*/
+			}
+
+		# Matrix/Assets file?
 		} elseif (isset($a['filedir']) && isset($a['filename']) && !empty($a['filedir']) && !empty($a['filename'])) {
 			# Make the code more readable.
 			$dir = $a['filedir'];
 			$file = $this->settings[$dir]['path'].'/'.$a['filename'];
 
 			# Verify that the file is an image and exists.
-			if (!preg_match('/.(?:gif|jpg|jpeg|png|jpe)/i', $file) || !file_exists($file)) {
+			if (!preg_match('#\.(?:gif|jpg|jpeg|png|jpe)$#/i', $file) || !file_exists($file)) {
 				return;
 			}
 
-			# Check whether we need to resize the image.
-			$size = getimagesize($file);
-			if (($size[0] > $this->settings[$dir]['width']) || ($size[1] > $this->settings[$dir]['height'])) {
-				# Let's resize...
-				$this->resize($file, $dir);
-			}
+			# Let's resize...
+			$this->resize($file, $dir);
+
 		# If we are any other type of array, call ourself with their values also.
 		} else {
 			foreach ($a as $k => &$v) {
+				$alt = '';
+
+				# Support Older EE Versions.
+				if (is_string($v) && isset($a[$k.'_directory']) && isset($this->settings[$a[$k.'_directory']])) {
+					# EE 2.1.3, &c.
+					$alt = '{filedir_'.$a[$k.'_directory'].'}';
+					if (strpos($v, $alt) !== false) {
+						# EE 2.5, &c.
+						$alt = '';
+					}
+
+					$v = $alt.$v;
+				}
+
+				# And recurse...
 				$this->check_for_images_array($v);
 			}
 		}
@@ -159,34 +305,57 @@ class Img_autosizer_ext {
 	}
 
 	# Resize an image on-disk.
-	function resize($file, $id) {
-		# Move the file temporarily.
-		rename($file, $file.'.orig');
+	function resize($file, $upload_dir_id) {
+		$size = getimagesize($file);
+		$need_w = ($size[0] > $this->settings[$upload_dir_id]['width']);
+		$need_h = ($size[1] > $this->settings[$upload_dir_id]['height']);
 
-		# Configuration for the CodeIgniter image library
-		$config['width'] = $this->settings[$id]['width'];
-		$config['height'] = $this->settings[$id]['height'];
-		$config['maintain_ratio'] = true;
-		$config['master_dim'] = 'auto';
-		$config['library_path'] = $this->EE->config->item('image_library_path');
-		$config['image_library'] = $this->EE->config->item('image_resize_protocol');
+		if ($need_w || $need_h) {
+			# Move the file temporarily.
+			rename($file, $file.'.orig');
 
-		$config['source_image'] = $file.'.orig';
-		$config['new_image'] = $file;
+			# Configuration for the CodeIgniter image library
+			$config['width'] = $this->settings[$upload_dir_id]['width'];
+			$config['height'] = $this->settings[$upload_dir_id]['height'];
+			$config['maintain_ratio'] = true;
+			$config['master_dim'] = 'auto';
+			$config['library_path'] = $this->EE->config->item('image_library_path');
+			$config['image_library'] = $this->EE->config->item('image_resize_protocol');
 
-		# Load the image library and resize the image.
-		$this->EE->load->library('image_lib', $config);
-		$this->EE->image_lib->resize();
+			$config['source_image'] = file_exists($file.'.orig') ? $file.'.orig' : $file;
+			$config['new_image'] = $file;
 
-		# If there was an error, keep the original file.
-		if (!file_exists($file)) {
-			rename($file.'.orig', $file);
-		# Preserve disk space if requested.
-		} elseif (!$this->settings[$id]['preserve']) {
-			unlink($file.'.orig');
+			# Load the image library...
+			if (!isset($this->EE->image_lib)) {
+				$this->EE->load->library('image_lib', $config);
+			} else {
+				$this->EE->image_lib->initialize($config);
+			}
+
+			# And... resize.
+			$this->EE->image_lib->resize();
+
+			# If there was an error, keep the original file.
+			if (!file_exists($file)) {
+				rename($file.'.orig', $file);
+			# Preserve disk space if requested.
+			} elseif (!$this->settings[$upload_dir_id]['preserve']) {
+				unlink($file.'.orig');
+			}
+
+			$info = getimagesize($file);
+
+			//echo $this->settings[$upload_dir_id]['width'].'x'.$this->settings[$upload_dir_id]['height'];
+			//echo ' => '.$info[0].'x'.$info[1].'<br />';
+
+			return $info ? array(
+				'width' => $info[0],
+				'height' => $info[1],
+				'size' => filesize($file)
+			) : false;
 		}
 
-		return;
+		return false;
 	}
 
 	# Generate a form for the user to enter settings by.
@@ -194,13 +363,14 @@ class Img_autosizer_ext {
 		$this->EE->load->helper('form');
 		$this->EE->load->library('table');
 
+		$this->_load_upload_prefs();
+
 		# Defines
 		$vars = array();
 		$yes_no_options = array('1' => lang('yes'), '0' => lang('no'));
 
 		# Loop through all the defined upload directories.
-		$vars['settings'] = array(
-			'default' => '',
+		$vars['settings'][lang('Default Settings')] = array(
 			'width' => form_input('width', $this->settings['default']['width']),
 			'height' => form_input('height', $this->settings['default']['height']),
 			'preserve' => form_dropdown('preserve', $yes_no_options, $this->settings['default']['preserve'])
@@ -210,11 +380,11 @@ class Img_autosizer_ext {
 				continue;
 			}
 
-			$vars['settings']['-'.$k] = '&nbsp;';
-			$vars['settings']['label-'.$k] = htmlentities($v['path']);
-			$vars['settings']['width-'.$k] = form_input('width-'.$k, $v['width']);
-			$vars['settings']['height-'.$k] = form_input('height-'.$k, $v['height']);
-			$vars['settings']['preserve-'.$k] = form_dropdown('preserve-'.$k, $yes_no_options, $v['preserve']);
+			$title = lang('settings_for').' '.htmlentities($v['path']);
+
+			$vars['settings'][$title]['width-'.$k] = form_input('width-'.$k, $v['width']);
+			$vars['settings'][$title]['height-'.$k] = form_input('height-'.$k, $v['height']);
+			$vars['settings'][$title]['preserve-'.$k] = form_dropdown('preserve-'.$k, $yes_no_options, $v['preserve']);
 		}
 
 		# Return an array of HTML strings.
@@ -229,6 +399,7 @@ class Img_autosizer_ext {
 	
 		unset($_POST['submit']);
 		$this->EE->lang->loadfile('img_autosizer');
+		$this->_load_upload_prefs();
 
 		# Read answers...
 		foreach ($_POST as $k => $v) {

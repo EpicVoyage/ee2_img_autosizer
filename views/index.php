@@ -1,18 +1,18 @@
-<?=form_open('C=addons_extensions'.AMP.'M=save_extension_settings'.AMP.'file=img_autosizer');?>
-<?php
-$this->table->set_template($cp_pad_table_template);
-$this->table->set_heading(
-    array('data' => lang('setting'), 'style' => 'width:50%;'),
-    lang('value')
-);
+<?php echo form_open('C=addons_extensions'.AMP.'M=save_extension_settings'.AMP.'file=img_autosizer');
+foreach ($settings as $k => $v) {
+	$this->table->set_template($cp_pad_table_template);
+	$this->table->set_heading(
+		array('data' => $k, 'style' => 'width:50%;'),
+		lang('value')
+	);
 
-foreach ($settings as $key => $val) {
-	$tag = explode('-', $key);
-	$this->table->add_row(lang($tag[0]), $val);
+	foreach ($v as $key => $val) {
+		$tag = explode('-', $key);
+		$this->table->add_row(lang($tag[0]), $val);
+	}
+
+	echo $this->table->generate();
 }
-
-echo $this->table->generate();
-?>
-<p><?=form_submit('submit', lang('submit'), 'class="submit"')?></p>
-<?php $this->table->clear()?>
-<?=form_close()?>
+echo '<p>'.form_submit('submit', lang('submit'), 'class="submit"').'</p>';
+$this->table->clear();
+echo form_close();

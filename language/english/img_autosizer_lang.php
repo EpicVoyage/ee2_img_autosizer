@@ -1,5 +1,5 @@
 <?php
-$lang['setting'] = 'Name';
+$lang['settings_for'] = 'Settings for';
 $lang['value'] = 'Value';
 $lang['submit'] = 'Submit';
 
