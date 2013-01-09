@@ -23,6 +23,7 @@ class Img_autosizer_ext {
 	# Our script's settings
 	var $settings = array(
 		'default' => array(
+			'name' => false,
 			'width' => 800,
 			'height' => 600,
 			'preserve' => 0
@@ -72,6 +73,7 @@ class Img_autosizer_ext {
 			foreach ($directories as $dir) {
 				# Use directory-specific settings.
 				$this->settings[$dir['id']] = array(
+					'name' => $dir['name'],
 					'path' => $dir['server_path'],
 					'url' => $dir['url'],
 					'width' => isset($this->settings[$dir['id']]) && isset($this->settings[$dir['id']]['width']) ?
@@ -380,7 +382,7 @@ class Img_autosizer_ext {
 				continue;
 			}
 
-			$title = lang('settings_for').' '.htmlentities($v['path']);
+			$title = lang('settings_for').($v['name'] ? ' '.htmlentities($v['name']) : 'Unnamed').' ('.htmlentities($v['path']).')';
 
 			$vars['settings'][$title]['width-'.$k] = form_input('width-'.$k, $v['width']);
 			$vars['settings'][$title]['height-'.$k] = form_input('height-'.$k, $v['height']);
